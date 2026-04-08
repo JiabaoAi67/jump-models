@@ -8,10 +8,7 @@
 
 This repository extends Meta's [`flow_matching`](https://github.com/facebookresearch/flow_matching) library with from-scratch reproductions of **six recent generative paradigms** that move beyond standard ODE-based / Gaussian-noise generation, all on the same 2D checkerboard so you can directly see how they differ.
 
-| | | | | | |
-|:---:|:---:|:---:|:---:|:---:|:---:|
-| ![Flow Matching](assets/anim_flow.gif) | ![Jump-only](assets/anim_jump.gif) | ![Jump + Flow](assets/anim_jumpflow.gif) | ![GMFlow](assets/anim_gmflow.gif) | ![PDGM-ZZP](assets/anim_pdgm.gif) | ![DLPM](assets/anim_dlpm.gif) |
-| **Flow Matching** (baseline) | **Jump-only** | **Jump + Flow** | **GMFlow** (GM-SDE 2) | **PDGM-ZZP** | **DLPM** (α=1.8) |
+![All six methods, perfectly synced](assets/anim_all.gif)
 
 All six models share the **same MLP backbone** (4 hidden layers of width 512 + Swish), the same training budget (10k iters, batch 4096 on the 2D checkerboard), and the same NFE = 100 backward sampler in the GIFs above. The only thing that changes between methods is **what kind of stochastic process generates the trajectory** and **what the network predicts**.
 
