@@ -110,27 +110,33 @@ def sample_skewed_levy(
     :math:`\alpha/2`-stable random variable, used as the auxiliary "a" in
     the augmented representation of S-alpha-S noise.
 
-    For :math:`\alpha = 2` this is identically 2 (no noise mixture).
+    Scaled so that ``sqrt(a) * randn`` has unit variance at :math:`\alpha = 2`
+    (i.e. it equals :math:`\mathcal{N}(0, I)`). This guarantees that the
+    DLPM noise prior at the bottom of the schedule is on the **same scale**
+    as the Gaussian prior used by Flow Matching / Jump / GMFlow / PDGM,
+    making the few-step visualisations directly comparable.
 
-    Includes the standard rescale factor :math:`(2 \cos(\pi\alpha/4))^{2/\alpha}`
-    so that ``sqrt(a) * randn`` reproduces a canonical :math:`S_\alpha S(1)`
-    sample. This matches the rescale used inside the official
-    ``LevyStable.sample(is_isotropic=True)`` branch (and is what the
-    ``gen_eps`` inference initialiser uses), so that the alpha-stable noise
-    is on the same scale as a Gaussian for :math:`\alpha \to 2`.
+    The official ``gen_skewed_levy`` instead uses the canonical
+    :math:`S_\alpha S(\text{scale}=1)` rescale factor
+    :math:`(2 \cos(\pi\alpha/4))^{2/\alpha}`. At :math:`\alpha = 2` that
+    gives ``a == 2`` and ``sqrt(a)*z == sqrt(2) * randn``, i.e. an
+    :math:`\mathcal{N}(0, 2)` prior. We divide that by an extra factor of 2
+    so the prior is :math:`\mathcal{N}(0, 1)` at :math:`\alpha = 2` and
+    interpolates smoothly to a SaS distribution with comparable spread for
+    :math:`\alpha < 2`.
 
     The optional ``clamp_a`` matches the official ``gen_skewed_levy``'s
     ``clamp_a = 2000`` default to limit pathological tail outliers.
     """
     if abs(alpha - 2.0) < 1e-9:
-        return 2.0 * torch.ones(shape, device=device, dtype=torch.float32)
+        # a == 1 -> sqrt(a) * randn == randn ~ N(0, 1)
+        return torch.ones(shape, device=device, dtype=torch.float32)
     a_raw = _sample_stable(
         alpha_inner=alpha / 2.0, beta=1.0, shape=shape, device=device, generator=generator
     )
-    # Rescale so that sqrt(a) * N(0,1) is canonical S_alpha S(scale=1).
-    # Same factor used in the official torchlevy/levy.py is_isotropic branch:
-    #     a <- 2 * cos(pi * alpha / 4) ** (2/alpha) * a_raw
-    rescale = (2.0 * math.cos(math.pi * alpha / 4.0)) ** (2.0 / alpha)
+    # Canonical scale rescale (matches official torchlevy is_isotropic branch),
+    # then an extra /2 so that sqrt(a)*randn matches N(0, 1) at alpha=2.
+    rescale = 0.5 * (2.0 * math.cos(math.pi * alpha / 4.0)) ** (2.0 / alpha)
     a = rescale * a_raw
     if clamp_a is not None:
         a = a.clamp(min=0.0, max=clamp_a)
