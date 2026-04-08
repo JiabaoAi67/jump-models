@@ -2,7 +2,7 @@
 
 # jump-models
 
-**Generative models beyond standard diffusion — implemented and compared on a unified 2D toy benchmark**
+**Jump Generative models on non-discrete state spaces — implemented and compared on a unified 2D toy benchmark**
 
 </div>
 
