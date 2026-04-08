@@ -52,7 +52,7 @@ The simplest of the five, and the baseline against which everything else is comp
 
 ### 2. Jump-only — Generator Matching, Holderrieth et al., ICLR 2025
 
-Uses the *same* CondOT probability path, but realises it with a **continuous-time Markov chain** instead of an ODE: at each time the particle has some rate $\lambda_t(x_t)$ to suddenly jump to a new location drawn from a categorical $J_t(x' \mid x_t)$ over discretised bins. The conditional jump kernel given the data target $z = x_1$ is analytic (paper Generator Matching, eqs. for $k_t$, $\lambda_z$, $J_z$); the network is trained with a Bregman divergence (continuous-time ELBO) between its predicted $Q_\theta = \lambda_\theta J_\theta$ and the conditional $Q_z$. See [`flow_matching/loss/jump_loss.py`](flow_matching/loss/jump_loss.py).
+Uses the *same* CondOT probability path, but realises it with a **(Markov) jump process on $\mathbb{R}^d$** instead of an ODE: at each time the particle has some rate $\lambda_t(x_t)$ to suddenly jump to a new location drawn from a jump measure $J_t(x' \mid x_t)$ — in our 2D toy implementation we parameterise it as a categorical over discretised bin centres plus uniform within-bin jitter, so the state stays in $\mathbb{R}^2$. **This is *not* a CTMC**: in the Generator Matching Theorem 1 / Table 1 taxonomy, "CTMC" is reserved for finite discrete state spaces $|S| < \infty$ where the generator is a rate matrix; jump processes for $S = \mathbb{R}^d$ are a *separate* model class — the paper's contribution #2 specifically calls them "an unexplored model class for $\mathbb{R}^d$". The conditional jump kernel given the data target $z = x_1$ is analytic; the network is trained with a Bregman divergence (continuous-time ELBO) between its predicted $Q_\theta = \lambda_\theta J_\theta$ and the conditional $Q_z$. See [`flow_matching/loss/jump_loss.py`](flow_matching/loss/jump_loss.py).
 
 ### 3. Jump + Flow — Generator Matching, Markov superposition
 
@@ -81,8 +81,8 @@ The most exotic of the five. **Augments the state to $(x, v) \in \mathbb{R}^d \t
 | | State space | Forward process | Network output | Loss |
 |---|---|---|---|---|
 | **Flow Matching** | $\mathbb{R}^d$ | Deterministic interpolation $(1-t)x_0 + tx_1$ | Mean velocity $\mu_\theta \in \mathbb{R}^d$ | L2 |
-| **Jump-only** | $\mathbb{R}^d$ | CondOT path realised as a CTMC | $(\lambda_\theta, J_\theta)$ — rate + categorical over bins | Bregman / continuous-time ELBO |
-| **Jump + Flow** | $\mathbb{R}^d$ | Markov superposition of ODE + CTMC | $\mu_\theta, \lambda_\theta, J_\theta$ | $\mathcal{L}_\text{flow} + \mathcal{L}_\text{jump}$ |
+| **Jump-only** | $\mathbb{R}^d$ | CondOT path realised as a Markov **jump process** on $\mathbb{R}^d$ (*not* a CTMC) | $(\lambda_\theta, J_\theta)$ — rate + categorical over bins | Bregman / continuous-time ELBO |
+| **Jump + Flow** | $\mathbb{R}^d$ | Markov superposition of ODE + jump process | $\mu_\theta, \lambda_\theta, J_\theta$ | $\mathcal{L}_\text{flow} + \mathcal{L}_\text{jump}$ |
 | **GMFlow** | $\mathbb{R}^d$ | Same as Flow Matching | GM params $\{A_k, \mu_k, s\}$ over velocity | NLL (or transition NLL) |
 | **PDGM-ZZP** | $\mathbb{R}^d \times \{-1,+1\}^d$ | PDMP: deterministic motion + discrete velocity flips | Per-coord density ratios $r_i = p(-v_i\mid x)/p(v_i\mid x)$ | Implicit ratio matching |
 | **DLPM** | $\mathbb{R}^d$ | DDPM with α-stable noise (cosine schedule) | SaS noise $\hat\epsilon$ in augmented form $\sqrt{a_t}\, z_t$ | L2-norm of eps prediction |
