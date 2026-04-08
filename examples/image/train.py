@@ -20,6 +20,8 @@ import torchvision.datasets as datasets
 from models.model_configs import instantiate_model
 from train_arg_parser import get_args_parser
 
+from torch.utils.tensorboard import SummaryWriter
+
 from training import distributed_mode
 from training.data_transform import get_train_transform
 from training.eval_loop import eval_model
@@ -61,10 +63,19 @@ def main(args):
     if args.dataset == "imagenet":
         dataset_train = datasets.ImageFolder(args.data_path, transform=transform_train)
     elif args.dataset == "cifar10":
+        # Allow locally-prepared CIFAR-10 (e.g., converted from HF parquet) by
+        # disabling torchvision's MD5 check on the pickle files.
+        datasets.CIFAR10.train_list = [
+            [fn, None] for fn, _ in datasets.CIFAR10.train_list
+        ]
+        datasets.CIFAR10.test_list = [
+            [fn, None] for fn, _ in datasets.CIFAR10.test_list
+        ]
+        datasets.CIFAR10.meta = {**datasets.CIFAR10.meta, "md5": None}
         dataset_train = datasets.CIFAR10(
             root=args.data_path,
             train=True,
-            download=True,
+            download=False,
             transform=transform_train,
         )
     else:
@@ -94,6 +105,9 @@ def main(args):
         architechture=args.dataset,
         is_discrete=args.discrete_flow_matching,
         use_ema=args.use_ema,
+        jump_flow=getattr(args, "jump_flow", False),
+        jump_only=getattr(args, "jump_only", False),
+        num_bins=getattr(args, "num_bins", 256),
     )
 
     model.to(device)
@@ -136,6 +150,14 @@ def main(args):
 
     loss_scaler = NativeScaler()
 
+    # TensorBoard writer (only on main process)
+    tb_writer = None
+    if args.output_dir and distributed_mode.is_main_process():
+        tb_dir = os.path.join(args.output_dir, "tb")
+        os.makedirs(tb_dir, exist_ok=True)
+        tb_writer = SummaryWriter(log_dir=tb_dir)
+        logger.info(f"TensorBoard logging to {tb_dir}")
+
     load_model(
         args=args,
         model_without_ddp=model_without_ddp,
@@ -159,6 +181,7 @@ def main(args):
                 epoch=epoch,
                 loss_scaler=loss_scaler,
                 args=args,
+                tb_writer=tb_writer,
             )
             log_stats = {
                 **{f"train_{k}": v for k, v in train_stats.items()},
@@ -199,8 +222,11 @@ def main(args):
                 epoch=epoch,
                 fid_samples=fid_samples,
                 args=args,
+                tb_writer=tb_writer,
             )
             log_stats.update({f"eval_{k}": v for k, v in eval_stats.items()})
+            if tb_writer is not None and "fid" in eval_stats:
+                tb_writer.add_scalar("eval/fid", eval_stats["fid"], epoch)
 
         if args.output_dir and distributed_mode.is_main_process():
             with open(
@@ -214,6 +240,8 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     logger.info(f"Training time {total_time_str}")
+    if tb_writer is not None:
+        tb_writer.close()
 
 
 if __name__ == "__main__":

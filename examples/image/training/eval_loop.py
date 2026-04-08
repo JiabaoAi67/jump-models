@@ -16,10 +16,12 @@ import torch
 from flow_matching.path import MixtureDiscreteProbPath
 from flow_matching.path.scheduler import PolynomialConvexScheduler
 from flow_matching.solver import MixtureDiscreteEulerSolver
+from flow_matching.solver.jump_flow_solver import JumpFlowEulerSolver, JumpOnlyEulerSolver
 from flow_matching.solver.ode_solver import ODESolver
 from flow_matching.utils import ModelWrapper
 from models.discrete_unet import DiscreteUNetModel
 from models.ema import EMA
+from models.jump_flow_unet import JumpFlowUNetModel, JumpOnlyUNetModel
 from torch.nn.modules import Module
 from torch.nn.parallel import DistributedDataParallel
 from torchmetrics.image.fid import FrechetInceptionDistance
@@ -31,6 +33,31 @@ from training.train_loop import MASK_TOKEN
 logger = logging.getLogger(__name__)
 
 PRINT_FREQUENCY = 50
+
+
+class JumpFlowModelWrapper(ModelWrapper):
+    """Wrapper for jump/jump+flow models during sampling.
+
+    The solver expects model.forward(x, t, **extras) to return a dict
+    with keys 'velocity', 'jump_logits', 'jump_intensity'.
+    This wrapper handles CFG=0 (unconditional) case and calls the
+    underlying model.
+    """
+
+    def __init__(self, model: Module):
+        super().__init__(model)
+
+    def forward(
+        self, x: torch.Tensor, t: torch.Tensor, cfg_scale: float = 0.0, label: torch.Tensor = None
+    ) -> dict[str, torch.Tensor]:
+        t_batch = torch.zeros(x.shape[0], device=x.device) + t
+        extra = {"label": label} if label is not None else {}
+
+        with torch.cuda.amp.autocast(), torch.no_grad():
+            result = self.model(x, t_batch, extra=extra)
+
+        # Cast to float32
+        return {k: v.to(dtype=torch.float32) for k, v in result.items()}
 
 
 class CFGScaledModel(ModelWrapper):
@@ -84,12 +111,29 @@ def eval_model(
     epoch: int,
     fid_samples: int,
     args: Namespace,
+    tb_writer=None,
 ):
     gc.collect()
-    cfg_scaled_model = CFGScaledModel(model=model)
-    cfg_scaled_model.train(False)
+    jump_flow = getattr(args, "jump_flow", False)
+    jump_only = getattr(args, "jump_only", False)
+    num_bins = getattr(args, "num_bins", 256)
 
-    if args.discrete_flow_matching:
+    if jump_flow or jump_only:
+        jump_model_wrapper = JumpFlowModelWrapper(model=model)
+        jump_model_wrapper.train(False)
+    else:
+        cfg_scaled_model = CFGScaledModel(model=model)
+        cfg_scaled_model.train(False)
+
+    if jump_flow:
+        solver = JumpFlowEulerSolver(
+            model=jump_model_wrapper, num_bins=num_bins,
+        )
+    elif jump_only:
+        solver = JumpOnlyEulerSolver(
+            model=jump_model_wrapper, num_bins=num_bins,
+        )
+    elif args.discrete_flow_matching:
         scheduler = PolynomialConvexScheduler(n=3.0)
         path = MixtureDiscreteProbPath(scheduler=scheduler)
         p = torch.zeros(size=[257], dtype=torch.float32, device=device)
@@ -119,8 +163,27 @@ def eval_model(
         fid_metric.update(samples, real=True)
 
         if num_synthetic < fid_samples:
-            cfg_scaled_model.reset_nfe_counter()
-            if args.discrete_flow_matching:
+            if not (jump_flow or jump_only):
+                cfg_scaled_model.reset_nfe_counter()
+
+            if jump_flow or jump_only:
+                # Jump / Jump+Flow sampling
+                x_0 = torch.randn(samples.shape, dtype=torch.float32, device=device)
+                step_size = getattr(args, "jump_step_size", 0.01)
+
+                synthetic_samples = solver.sample(
+                    x_init=x_0,
+                    step_size=step_size,
+                    label=labels,
+                )
+
+                # Scale from [-1,1] to [0,1]
+                synthetic_samples = torch.clamp(
+                    synthetic_samples * 0.5 + 0.5, min=0.0, max=1.0
+                )
+                synthetic_samples = torch.floor(synthetic_samples * 255)
+
+            elif args.discrete_flow_matching:
                 # Discrete sampling
                 x_0 = (
                     torch.zeros(samples.shape, dtype=torch.long, device=device)
@@ -173,20 +236,27 @@ def eval_model(
                 )
                 synthetic_samples = torch.floor(synthetic_samples * 255)
             synthetic_samples = synthetic_samples.to(torch.float32) / 255.0
-            logger.info(
-                f"{samples.shape[0]} samples generated in {cfg_scaled_model.get_nfe()} evaluations."
-            )
+            if jump_flow or jump_only:
+                logger.info(f"{samples.shape[0]} samples generated.")
+            else:
+                logger.info(
+                    f"{samples.shape[0]} samples generated in {cfg_scaled_model.get_nfe()} evaluations."
+                )
             if num_synthetic + synthetic_samples.shape[0] > fid_samples:
                 synthetic_samples = synthetic_samples[: fid_samples - num_synthetic]
             fid_metric.update(synthetic_samples, real=False)
             num_synthetic += synthetic_samples.shape[0]
             if not snapshots_saved and args.output_dir:
-                save_image(
-                    synthetic_samples,
-                    fp=Path(args.output_dir)
+                snap_path = (
+                    Path(args.output_dir)
                     / "snapshots"
-                    / f"{epoch}_{data_iter_step}.png",
+                    / f"{epoch}_{data_iter_step}.png"
                 )
+                save_image(synthetic_samples, fp=snap_path)
+                if tb_writer is not None:
+                    from torchvision.utils import make_grid
+                    grid = make_grid(synthetic_samples, nrow=8)
+                    tb_writer.add_image("eval/samples", grid, global_step=epoch)
                 snapshots_saved = True
 
             if args.save_fid_samples and args.output_dir:

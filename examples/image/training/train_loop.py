@@ -10,6 +10,7 @@ import math
 from typing import Iterable
 
 import torch
+from flow_matching.loss.jump_loss import JumpLoss
 from flow_matching.path import CondOTProbPath, MixtureDiscreteProbPath
 from flow_matching.path.scheduler import PolynomialConvexScheduler
 from models.ema import EMA
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 MASK_TOKEN = 256
 PRINT_FREQUENCY = 50
+DEFAULT_NUM_BINS = 256
 
 
 def skewed_timestep_sample(num_samples: int, device: torch.device) -> torch.Tensor:
@@ -42,6 +44,7 @@ def train_one_epoch(
     epoch: int,
     loss_scaler: NativeScalerWithGradNormCount,
     args: argparse.Namespace,
+    tb_writer=None,
 ):
     gc.collect()
     model.train(True)
@@ -49,11 +52,19 @@ def train_one_epoch(
     epoch_loss = MeanMetric().to(device, non_blocking=True)
 
     accum_iter = args.accum_iter
+    jump_flow = getattr(args, "jump_flow", False)
+    jump_only = getattr(args, "jump_only", False)
+    num_bins = getattr(args, "num_bins", DEFAULT_NUM_BINS)
+
     if args.discrete_flow_matching:
         scheduler = PolynomialConvexScheduler(n=3.0)
         path = MixtureDiscreteProbPath(scheduler=scheduler)
     else:
         path = CondOTProbPath()
+
+    # Initialize jump loss if needed
+    if jump_flow or jump_only:
+        jump_loss_fn = JumpLoss(num_bins=num_bins, reduction="mean").to(device)
 
     for data_iter_step, (samples, labels) in enumerate(data_loader):
         if data_iter_step % accum_iter == 0:
@@ -70,7 +81,48 @@ def train_one_epoch(
         else:
             conditioning = {"label": labels}
 
-        if args.discrete_flow_matching:
+        if jump_flow or jump_only:
+            # Jump / Jump+Flow training (Generator Matching)
+            # Uses CondOT path (same as continuous flow matching)
+            samples = samples * 2.0 - 1.0  # [0,1] -> [-1,1]
+            noise = torch.randn_like(samples).to(device)
+            t = torch.rand(samples.shape[0]).to(device)
+
+            # CondOT path: x_t = (1-t)*noise + t*data
+            path_sample = path.sample(t=t, x_0=noise, x_1=samples)
+            x_t = path_sample.x_t
+
+            with torch.cuda.amp.autocast():
+                model_out = model(x_t, t, extra=conditioning)
+
+                if jump_flow:
+                    # Flow loss: MSE on velocity
+                    u_t = path_sample.dx_t
+                    flow_loss = torch.pow(
+                        model_out["velocity"] - u_t, 2
+                    ).mean()
+
+                    # Jump loss: ELBO/KL
+                    j_loss = jump_loss_fn(
+                        jump_logits=model_out["jump_logits"],
+                        jump_intensity_logit=model_out["jump_intensity"],
+                        x_t=x_t,
+                        x_1=samples,
+                        t=t,
+                    )
+
+                    loss = flow_loss + j_loss
+                else:
+                    # Jump only: no flow loss
+                    loss = jump_loss_fn(
+                        jump_logits=model_out["jump_logits"],
+                        jump_intensity_logit=model_out["jump_intensity"],
+                        x_t=x_t,
+                        x_1=samples,
+                        t=t,
+                    )
+
+        elif args.discrete_flow_matching:
             samples = (samples * 255.0).to(torch.long)
             t = torch.torch.rand(samples.shape[0]).to(device)
 
@@ -132,6 +184,10 @@ def train_one_epoch(
             logger.info(
                 f"Epoch {epoch} [{data_iter_step}/{len(data_loader)}]: loss = {batch_loss.compute()}, lr = {lr}"
             )
+            if tb_writer is not None:
+                global_step = epoch * len(data_loader) + data_iter_step
+                tb_writer.add_scalar("train/loss", loss_value, global_step)
+                tb_writer.add_scalar("train/lr", lr, global_step)
 
     lr_schedule.step()
     return {"loss": float(epoch_loss.compute().detach().cpu())}

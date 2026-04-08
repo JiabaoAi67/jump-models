@@ -71,3 +71,6 @@ output_dir/
 *mixture_uniform_step=320001/
 *.out
 *.err
+# Claude Code local state
+.claude/
+

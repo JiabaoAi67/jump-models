@@ -203,4 +203,28 @@ def get_args_parser():
         help="Number of sampling steps for discrete FM.",
     )
 
+    # Generator Matching: Jump model arguments
+    parser.add_argument(
+        "--jump_flow",
+        action="store_true",
+        help="Train jump+flow Markov superposition model (Generator Matching).",
+    )
+    parser.add_argument(
+        "--jump_only",
+        action="store_true",
+        help="Train pure jump model (Generator Matching).",
+    )
+    parser.add_argument(
+        "--num_bins",
+        default=256,
+        type=int,
+        help="Number of bins for jump model discretization in [-1,1].",
+    )
+    parser.add_argument(
+        "--jump_step_size",
+        default=0.01,
+        type=float,
+        help="Step size for jump/jump+flow Euler sampling.",
+    )
+
     return parser

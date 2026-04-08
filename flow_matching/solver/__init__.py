@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from .discrete_solver import MixtureDiscreteEulerSolver
+from .jump_flow_solver import JumpFlowEulerSolver, JumpOnlyEulerSolver
 from .ode_solver import ODESolver
 from .riemannian_ode_solver import RiemannianODESolver
 from .solver import Solver
@@ -15,4 +16,6 @@ __all__ = [
     "ModelWrapper",
     "MixtureDiscreteEulerSolver",
     "RiemannianODESolver",
+    "JumpFlowEulerSolver",
+    "JumpOnlyEulerSolver",
 ]
