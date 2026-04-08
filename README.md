@@ -17,14 +17,14 @@ All five models share the **same MLP backbone** (4 hidden layers of width 512 + 
 
 ## Few-step sampling comparison
 
-The whole point of these "non-Gaussian" formulations is that they can be **much more sample-efficient** at low NFE than vanilla flow matching. Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
+ Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
 
 ![NFE comparison](assets/nfe_comparison.png)
 
 * **Flow Matching** needs ≥ 20 Euler steps before the checkerboard structure is recognisable.
-* **Jump-only** and **Jump + Flow** already show 8 mode blobs at NFE = 2 because the per-step jump kernel is multimodal by construction.
+* **Jump-only** and **Jump + Flow** already show mode blobs at NFE = 2 because the per-step jump kernel is multimodal by construction.
 * **GMFlow** is the most extreme case: with $K = 8$ mixture components, the analytic GM-SDE solver places one Gaussian on each checkerboard square in **a single step**.
-* **PDGM-ZZP** trades off — the velocity space is just $\{-1, +1\}^d$ so it needs many flips to mix, but it does so without ever invoking Brownian noise.
+* **PDGM-ZZP** trades off — the velocity space is just $\{-1, +1\}^d$ so it needs many flips to mix, its dynamics are more state-dependent than time-dependent, which may lead to better performance at larger NFE and provide greater potential for error correction.
 
 ## What's in here
 
