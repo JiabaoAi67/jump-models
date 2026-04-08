@@ -6,18 +6,18 @@
 
 </div>
 
-This repository extends Meta's [`flow_matching`](https://github.com/facebookresearch/flow_matching) library with from-scratch reproductions of **four recent generative paradigms** that move beyond Gaussian-noise diffusion, all on the same 2D checkerboard so you can directly see how they differ.
+This repository extends Meta's [`flow_matching`](https://github.com/facebookresearch/flow_matching) library with from-scratch reproductions of **six recent generative paradigms** that move beyond standard ODE-based / Gaussian-noise generation, all on the same 2D checkerboard so you can directly see how they differ.
 
-| | | | | |
-|:---:|:---:|:---:|:---:|:---:|
-| ![Flow Matching](assets/anim_flow.gif) | ![Jump-only](assets/anim_jump.gif) | ![Jump + Flow](assets/anim_jumpflow.gif) | ![GMFlow](assets/anim_gmflow.gif) | ![PDGM-ZZP](assets/anim_pdgm.gif) |
-| **Flow Matching** (baseline) | **Jump-only** | **Jump + Flow** | **GMFlow** (GM-SDE 2) | **PDGM-ZZP** |
+| | | | | | |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| ![Flow Matching](assets/anim_flow.gif) | ![Jump-only](assets/anim_jump.gif) | ![Jump + Flow](assets/anim_jumpflow.gif) | ![GMFlow](assets/anim_gmflow.gif) | ![PDGM-ZZP](assets/anim_pdgm.gif) | ![DLPM](assets/anim_dlpm.gif) |
+| **Flow Matching** (baseline) | **Jump-only** | **Jump + Flow** | **GMFlow** (GM-SDE 2) | **PDGM-ZZP** | **DLPM** (α=1.8) |
 
-All five models share the **same MLP backbone** (4 hidden layers of width 512 + Swish), the same training budget (10k iters, batch 4096 on CondOT path / 2D checkerboard), and the same NFE = 100 backward sampler in the GIFs above. The only thing that changes between methods is **what kind of stochastic process generates the trajectory** and **what the network predicts**.
+All six models share the **same MLP backbone** (4 hidden layers of width 512 + Swish), the same training budget (10k iters, batch 4096 on the 2D checkerboard), and the same NFE = 100 backward sampler in the GIFs above. The only thing that changes between methods is **what kind of stochastic process generates the trajectory** and **what the network predicts**.
 
 ## Few-step sampling comparison
 
- Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
+The whole point of most of these "non-Gaussian" formulations is that they can be **much more sample-efficient** at low NFE than vanilla flow matching. Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
 
 ![NFE comparison](assets/nfe_comparison.png)
 
@@ -25,6 +25,7 @@ All five models share the **same MLP backbone** (4 hidden layers of width 512 + 
 * **Jump-only** and **Jump + Flow** already show mode blobs at NFE = 2 because the per-step jump kernel is multimodal by construction.
 * **GMFlow** is the most extreme case: with $K = 8$ mixture components, the analytic GM-SDE solver places one Gaussian on each checkerboard square in **a single step**.
 * **PDGM-ZZP** trades off — the velocity space is just $\{-1, +1\}^d$ so it needs many flips to mix, its dynamics are more state-dependent than time-dependent, which may lead to better performance at larger NFE and provide greater potential for error correction.
+* **DLPM** is the only method here that uses **non-Gaussian noise**: it replaces the Gaussian forward noise of DDPM with a heavier-tailed α-stable Lévy noise. On a bounded toy like the checkerboard this hurts few-step quality (the heavy-tailed prior takes more steps to mix), but on **heavy-tailed or class-imbalanced data** the heavy-tailed prior is exactly what the paper shows you want.
 
 ## What's in here
 
@@ -34,6 +35,7 @@ All five models share the **same MLP backbone** (4 hidden layers of width 512 + 
 | [`flow_matching/loss/jump_loss.py`](flow_matching/loss/jump_loss.py)<br>[`flow_matching/solver/jump_flow_solver.py`](flow_matching/solver/jump_flow_solver.py) | Jump kernel + Markov-superposition Euler sampler | Holderrieth et al., **Generator Matching**, ICLR 2025 ([arXiv 2410.20587](https://arxiv.org/abs/2410.20587)) |
 | [`flow_matching/gmflow/`](flow_matching/gmflow/) | GM NLL loss, $u \to x_0$ reparameterisation, GM-SDE / GM-ODE 1st & 2nd-order solvers | Chen et al., **Gaussian Mixture Flow Matching**, ICML 2025 ([arXiv 2504.05304](https://arxiv.org/abs/2504.05304)) |
 | [`flow_matching/pdmp/`](flow_matching/pdmp/) | Forward Zig-Zag simulator, implicit ratio-matching loss, DJD splitting backward solver | Bertazzi et al., **Piecewise Deterministic Generative Models**, NeurIPS 2024 ([arXiv 2407.19448](https://arxiv.org/abs/2407.19448)) |
+| [`flow_matching/dlpm/`](flow_matching/dlpm/) | Symmetric α-stable noise (Chambers-Mallows-Stuck), augmented (a, z) one-r.v. training loss elements, stochastic DLPM and deterministic DLIM samplers | Shariatian et al., **Denoising Lévy Probabilistic Models**, ICLR 2025 ([arXiv 2407.18609](https://arxiv.org/abs/2407.18609)) |
 
 The five end-to-end demo notebooks live in `examples/`:
 
@@ -43,6 +45,7 @@ The five end-to-end demo notebooks live in `examples/`:
 | [examples/2d_jump_flow_comparison.ipynb](examples/2d_jump_flow_comparison.ipynb) | Flow vs Jump-only vs Jump + Flow |
 | [examples/2d_gmflow_vs_flow.ipynb](examples/2d_gmflow_vs_flow.ipynb) | Flow vs GMFlow (4 solver variants) |
 | [examples/2d_pdgm_zzp_vs_flow.ipynb](examples/2d_pdgm_zzp_vs_flow.ipynb) | Flow vs PDGM-ZZP |
+| [examples/2d_dlpm_vs_flow.ipynb](examples/2d_dlpm_vs_flow.ipynb) | Flow vs DLPM (α=1.8) |
 
 ## How each method works in one paragraph
 
@@ -64,6 +67,14 @@ Same forward path as Flow Matching, but the network **outputs an entire Gaussian
 $$q_\theta(u \mid x_t) = \sum_{k=1}^K A_k\, \mathcal{N}(u; \mu_k, s^2 I)$$
 This generalises vanilla flow ($K = 1$, fixed $s$ recovers L2 loss exactly). Trained with NLL — or, more stably, the *transition NLL* that pushes the velocity GM through the analytic reverse transition (paper eq. 9). Crucially, because the predicted distribution is a GM, the **reverse transition is itself an analytic GM**, so a single sampling step can already place mass on each mode of the data. K=8 GM-SDE produces a recognisable checkerboard at **NFE = 1**. See [`flow_matching/gmflow/`](flow_matching/gmflow/) — ported from the [official GMFlow code](https://github.com/Lakonik/GMFlow).
 
+### 6. DLPM — Shariatian et al., ICLR 2025
+
+A *very* clean modification of DDPM: keep the entire DDPM machinery (cosine schedule, eps-prediction, ancestral sampling) but **replace the Gaussian noise with a symmetric α-stable Lévy noise**:
+$$x_t = \bar\gamma_t\, x_0 + \bar\sigma_t\, \epsilon, \qquad \epsilon \sim S_\alpha S$$
+For $\alpha = 2$ this is exactly DDPM; for $\alpha < 2$ the noise has heavy power-law tails. The paper shows this helps on heavy-tailed data and class-imbalanced datasets where the rare classes need rare noise samples to be reachable in the forward process.
+
+For $\alpha < 2$ the SaS distribution has *infinite variance* so a naive L2 loss on $\epsilon$ would have infinite expected gradient. The official code uses two tricks (and we follow them faithfully in [`flow_matching/dlpm/`](flow_matching/dlpm/)): (i) **augmented sampling** $\epsilon = \sqrt{a_t}\, z_t$ where $a_t$ is positive $\alpha/2$-stable and $z_t$ is Gaussian, so each individual training sample is bounded; and (ii) **L2-norm loss** $\sqrt{\frac{1}{d}\sum_i (\hat\epsilon_i - \epsilon_{t,i})^2}$ instead of L2-squared, which keeps the loss expectation finite for any $\alpha > 1$. See [`flow_matching/dlpm/dlpm.py`](flow_matching/dlpm/dlpm.py) — direct port of [the official `darioShar/DLPM`](https://github.com/darioShar/DLPM).
+
 ### 5. PDGM-ZZP — Bertazzi et al., NeurIPS 2024
 
 The most exotic of the five. **Augments the state to $(x, v) \in \mathbb{R}^d \times \{-1, +1\}^d$**: $v$ is a binary "velocity" added to the position. The forward process is a **piecewise deterministic Markov process** (PDMP), specifically the Zig-Zag process: between events $\dot x = v$ (straight-line motion, no noise!), at random times the $i$-th velocity coordinate flips with rate $\lambda_i = (v_i x_i)_+ + \lambda_r$ — faster when the particle is moving outward. The remarkable theoretical fact is that the **time reversal of a ZZP is itself a ZZP**, with the only thing changed being a density-ratio multiplier on the rate. The network learns this density ratio with implicit ratio matching (Bertazzi et al. paper Appendix D.1, eq. 24). The whole formulation never needs Brownian motion. See [`flow_matching/pdmp/zzp.py`](flow_matching/pdmp/zzp.py).
@@ -77,6 +88,7 @@ The most exotic of the five. **Augments the state to $(x, v) \in \mathbb{R}^d \t
 | **Jump + Flow** | $\mathbb{R}^d$ | Markov superposition of ODE + CTMC | $\mu_\theta, \lambda_\theta, J_\theta$ | $\mathcal{L}_\text{flow} + \mathcal{L}_\text{jump}$ |
 | **GMFlow** | $\mathbb{R}^d$ | Same as Flow Matching | GM params $\{A_k, \mu_k, s\}$ over velocity | NLL (or transition NLL) |
 | **PDGM-ZZP** | $\mathbb{R}^d \times \{-1,+1\}^d$ | PDMP: deterministic motion + discrete velocity flips | Per-coord density ratios $r_i = p(-v_i\mid x)/p(v_i\mid x)$ | Implicit ratio matching |
+| **DLPM** | $\mathbb{R}^d$ | DDPM with α-stable noise (cosine schedule) | SaS noise $\hat\epsilon$ in augmented form $\sqrt{a_t}\, z_t$ | L2-norm of eps prediction |
 
 ## Installation
 
@@ -124,6 +136,14 @@ If you use the code from this fork, please cite the four underlying papers:
   booktitle={NeurIPS},
   year={2024},
   note={arXiv:2407.19448}
+}
+
+@inproceedings{shariatian2025dlpm,
+  title={Denoising L\'evy Probabilistic Models},
+  author={Shariatian, Dario and Simsekli, Umut and Durmus, Alain},
+  booktitle={ICLR},
+  year={2025},
+  note={arXiv:2407.18609}
 }
 ```
 
