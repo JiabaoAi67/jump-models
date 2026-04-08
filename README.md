@@ -24,6 +24,21 @@ The whole point of most of these "non-Gaussian" formulations is that they can be
 * **PDGM-ZZP** trades off — the velocity space is just $\{-1, +1\}^d$ so it needs many flips to mix, its dynamics are more state-dependent than time-dependent, which may lead to better performance at larger NFE and provide greater potential for error correction.
 * **DLPM** is the only method here that uses **non-Gaussian noise**: it replaces the Gaussian forward noise of DDPM with a heavier-tailed α-stable Lévy noise. You can see this directly in the GIF — the DLPM init frame is *visibly larger and more diffuse* than the tight Gaussian blob of every other method, with a clear heavy-tail halo. Those rare large noise draws are exactly the "Lévy jumps" the paper argues let DLPM reach isolated and rare modes. On a bounded toy like the checkerboard this hurts few-step quality (the heavy-tailed prior takes more steps to mix), but on **heavy-tailed or class-imbalanced data** the heavy-tailed prior is exactly what the paper shows you want.
 
+## Per-particle backward trajectories
+
+The full-distribution GIFs above hide *what an individual particle does* — but that's actually where the qualitative differences between these six methods are easiest to see. Below: 3 particles starting from the same fixed noise, traced backward at NFE = 100, with discrete-event markers (`x`) wherever a method has a notion of a "jump":
+
+![Per-particle backward trajectories](assets/particle_trajectories.png)
+
+* **Flow Matching**: smooth ODE curves — by construction, deterministic and continuous. No jump events ever.
+* **Jump-only**: each particle is *teleported* to a bin centre at every jump event; between jumps it sits still. The trajectory is a piecewise-constant zig-zag of horizontal/vertical hops.
+* **Jump + Flow**: small Euler flow steps between rarer jump teleports — the smoothness of flow inside a mode plus jumps to switch modes.
+* **GMFlow**: an SDE driven by Gaussian noise, so the trajectory is a continuous Brownian-like wiggle. No discrete jumps — every step is small.
+* **PDGM-ZZP**: piecewise-deterministic constant-velocity motion punctuated by velocity-flip events; each `x` marker is a step where at least one $v_i$ flipped its sign. The trajectory is a sequence of straight-line segments.
+* **DLPM (α = 1.8)**: heavy-tailed α-stable noise gives mostly Gaussian-like small steps but occasional anomalously large excursions — these are the "Lévy jumps". An `x` marker here is a step where the per-coord auxiliary $a_t$ exceeded a heavy-tail threshold (5.0, ≈ upper 5% of mass); equivalently, the step's noise amplitude $\sqrt{a_t}$ exceeded ≈ 1.6× the Gaussian baseline $\sqrt{2}$ — a magnitude a Gaussian sampler would essentially never produce.
+
+The reproducible build script is at [`examples/build_trajectory_grid.py`](examples/build_trajectory_grid.py).
+
 ## What's in here
 
 | Module | What it implements | Reference |
