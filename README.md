@@ -14,7 +14,7 @@ All six models share the **same MLP backbone** (4 hidden layers of width 512 + S
 
 ## Few-step sampling comparison
 
-Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
+Comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
 
 ![NFE comparison](assets/nfe_comparison.png)
 
