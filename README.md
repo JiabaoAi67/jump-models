@@ -14,12 +14,11 @@ All six models share the **same MLP backbone** (4 hidden layers of width 512 + S
 
 ## Few-step sampling comparison
 
-The whole point of most of these "non-Gaussian" formulations is that they can be **much more sample-efficient** at low NFE than vanilla flow matching. Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
+Here is the same comparison at NFE ∈ {2, 5, 10, 20, 50, 100}:
 
 ![NFE comparison](assets/nfe_comparison.png)
 
-* **Flow Matching** needs ≥ 20 Euler steps before the checkerboard structure is recognisable.
-* **Jump-only** and **Jump + Flow** already show mode blobs at NFE = 2 because the per-step jump kernel is multimodal by construction.
+* **Flow Matching**, **Jump-only** and **Jump + Flow** jump+flow better than flow or jump.
 * **GMFlow** is the most extreme case: with $K = 8$ mixture components, the analytic GM-SDE solver places one Gaussian on each checkerboard square in **a single step**.
 * **PDGM-ZZP** trades off — the velocity space is just $\{-1, +1\}^d$ so it needs many flips to mix, its dynamics are more state-dependent than time-dependent, which may lead to better performance at larger NFE and provide greater potential for error correction.
 * **DLPM** is the only method here that uses **non-Gaussian noise**: it replaces the Gaussian forward noise of DDPM with a heavier-tailed α-stable Lévy noise. You can see this directly in the GIF — the DLPM init frame is *visibly larger and more diffuse* than the tight Gaussian blob of every other method, with a clear heavy-tail halo. Those rare large noise draws are exactly the "Lévy jumps" the paper argues let DLPM reach isolated and rare modes. On a bounded toy like the checkerboard this hurts few-step quality (the heavy-tailed prior takes more steps to mix), but on **heavy-tailed or class-imbalanced data** the heavy-tailed prior is exactly what the paper shows you want.
